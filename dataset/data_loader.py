@@ -9,6 +9,27 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import pandas as pd
+import random
+
+class FontTransferDataset(Dataset):
+    def __init__(self, data_path, label_list):
+        import pickle
+        with open(data_path, "rb") as f:
+            self.data = pickle.load(f)
+        self.label_list = sorted(label_list)  # Ensure consistent one-hot encoding
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        sample = self.data[idx]
+        style_img = torch.tensor(sample["style_image"], dtype=torch.float32).unsqueeze(0) / 255.0
+        target_img = torch.tensor(sample["target_image"], dtype=torch.float32).unsqueeze(0) / 255.0
+        label = sample["target_label"]
+        label_index = self.label_list.index(label)
+        label_onehot = torch.nn.functional.one_hot(torch.tensor(label_index), num_classes=len(self.label_list)).float()
+        return style_img, label_onehot, target_img
+
 
 class TMNISTDataset(Dataset):
     """
@@ -31,9 +52,7 @@ class TMNISTDataset(Dataset):
         self.transform = transform
         
         # Try to load real dataset
-        self.data_images = []
-        self.char_labels = []
-        self.style_labels = []
+        self.samples = []
         
         # Check if dataset CSV file exists
         pkl_path = os.path.join(root_dir, 'TMNIST_Alphabet.pkl')
@@ -41,10 +60,30 @@ class TMNISTDataset(Dataset):
             try:
                 print(f"Found TMNIST pkl data at {pkl_path}, attempting to load...")
                 df = pd.read_pickle(pkl_path)
-                # Process the pkl file here according to its structure
-                self.data_images = df['image'].tolist()
-                self.char_labels = df['labels'].tolist()
-                self.style_names = df['names'].tolist()
+                # Filter allowed characters: 0-9 + A-Z + a-z
+                allowed_chars = set(
+                    [chr(i) for i in range(ord('0'), ord('9') + 1)] +
+                    [chr(i) for i in range(ord('A'), ord('Z') + 1)] +
+                    [chr(i) for i in range(ord('a'), ord('z') + 1)]
+                )
+                df = df[df['labels'].isin(allowed_chars)]
+                
+                # Group by font name
+                grouped = df.groupby('names')
+                self.samples = []
+                for font_name, group in grouped:
+                    char_to_img = {row['labels']: row['image'] for _, row in group.iterrows()}
+                    if len(char_to_img) < len(allowed_chars):
+                        continue
+                    label_list = list(char_to_img.keys())
+                    for _ in range(10):  # N pairs per font
+                        style_label, target_label = random.sample(label_list, 2)
+                        self.samples.append({
+                            'font_name': font_name,
+                            'style_image': char_to_img[style_label],
+                            'target_label': target_label,
+                            'target_image': char_to_img[target_label],
+                        })
             except Exception as e:
                 print(f"Error loading real dataset: {e}")
                 if create_dummy_data:
@@ -79,7 +118,7 @@ class TMNISTDataset(Dataset):
         
     def __len__(self):
         """Return dataset size"""
-        return len(self.style_names)
+        return len(self.samples)
     
     def __getitem__(self, idx):
         """
@@ -91,48 +130,16 @@ class TMNISTDataset(Dataset):
         Returns:
             dict: Dictionary containing image and labels
         """
-        char_label = self.char_labels[idx]
-        style_label = self.style_labels[idx]
-        
-        # Generate a patterned image based on character and style for better visualization
-        # Create structured noise that depends on character and style
-        image = np.zeros((28, 28), dtype=np.float32)
-        
-        # Create a simple pattern based on character ID
-        for i in range(28):
-            for j in range(28):
-                # Character affects the base pattern
-                if (i + j + char_label) % 4 == 0:
-                    image[i, j] = 0.8
-                    
-                # Style affects details and intensity
-                if (i * j + style_label) % 5 == 0:
-                    image[i, j] = 0.5
-                    
-                # Add a frame to differentiate characters
-                if i < 2 or i > 25 or j < 2 or j > 25:
-                    image[i, j] = 0.3
-        
-        # Add character-specific feature in the center
-        center_size = 8
-        start_i = (28 - center_size) // 2
-        start_j = (28 - center_size) // 2
-        for i in range(start_i, start_i + center_size):
-            for j in range(start_j, start_j + center_size):
-                if (i + j + char_label * 3) % 5 == 0:
-                    image[i, j] = 1.0
-        
-        # Convert to PIL Image
-        image = (image * 255).astype(np.uint8)
-        image = Image.fromarray(image)
-        
+        sample = self.samples[idx]
+        style_image = Image.fromarray((sample['style_image'] * 255).astype(np.uint8))
+        target_image = Image.fromarray((sample['target_image'] * 255).astype(np.uint8))
         if self.transform:
-            image = self.transform(image)
-            
+            style_image = self.transform(style_image)
+            target_image = self.transform(target_image)
         return {
-            'image': image,
-            'char_label': char_label,
-            'style_label': style_label
+            'style_image': style_image,
+            'target_label': sample['target_label'],
+            'target_image': target_image
         }
 
 def get_data_loaders(data_dir, batch_size=64, num_workers=4):
@@ -183,4 +190,4 @@ def get_data_loaders(data_dir, batch_size=64, num_workers=4):
         pin_memory=True
     )
     
-    return train_loader, val_loader, test_loader 
+    return train_loader, val_loader, test_loader
