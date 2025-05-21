@@ -9,6 +9,18 @@ from torch.nn import MSELoss, L1Loss
 from skimage.metrics import structural_similarity as ssim
 
 def vae_loss(recon_x, x, mu, log_var, kld_weight=1.0):
+    '''
+    VAE loss function
+    for the first version of VAE loss function 
+    - 2025.05.20
+    '''
+    recon_loss = F.mse_loss(recon_x, x, reduction='mean') 
+    kld_loss = -0.5 * torch.mean(torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim=1))  
+    total_loss = recon_loss + kld_weight * kld_loss
+    return total_loss, recon_loss.item(), kld_loss.item()
+
+
+def vae_loss_for_reference(recon_x, x, mu, log_var, kld_weight=1.0):
     """
     Standard VAE loss function, including reconstruction loss and KL divergence
     

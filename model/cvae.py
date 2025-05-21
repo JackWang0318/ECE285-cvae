@@ -6,6 +6,63 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class FontTransferCVAE(nn.Module):
+    def __init__(self, label_dim=62, latent_dim=64):
+        super().__init__()
+        self.latent_dim = latent_dim
+
+        # Style Encoder
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 32, 3, stride=2, padding=1),  # -> 14x14
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1), # -> 7x7
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, 256),
+            nn.ReLU()
+        )
+        self.fc_mu = nn.Linear(256, latent_dim)
+        self.fc_logvar = nn.Linear(256, latent_dim)
+
+        # Decoder
+        self.decoder_input = nn.Linear(latent_dim + label_dim, 256)
+        self.decoder = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(256, 64 * 7 * 7),
+            nn.ReLU(),
+            nn.Unflatten(1, (64, 7, 7)),
+            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),  # -> 14x14
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1),   # -> 28x28
+            nn.Sigmoid()
+        )
+
+    def encode(self, x):
+        h = self.encoder(x)
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        return mu, logvar
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def decode(self, z, label_onehot):
+        z_cat = torch.cat([z, label_onehot], dim=1)
+        return self.decoder(self.decoder_input(z_cat))
+
+    def forward(self, style_img, label_onehot):
+        mu, logvar = self.encode(style_img)
+        z = self.reparameterize(mu, logvar)
+        recon_img = self.decode(z, label_onehot)
+        return recon_img, mu, logvar
+
+def vae_loss_base(recon_x, x, mu, logvar):
+    recon_loss = nn.functional.mse_loss(recon_x, x, reduction='mean')
+    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
+    return recon_loss + kl_loss, recon_loss.item(), kl_loss.item()
+
 class Encoder(nn.Module):
     """
     CVAE encoder network, mapping input image and condition label to the mean and variance of the latent space
@@ -184,7 +241,7 @@ class CVAE(nn.Module):
     Conditional Variational Autoencoder (CVAE) Model
     """
     
-    def __init__(self, img_channels=1, img_size=28, latent_dim=128, condition_dim=1355, hidden_dims=None):
+    def __init__(self, img_channels=1, img_size=28, latent_dim=128, condition_dim=2990, hidden_dims=None):
         """
         Initialization function
         
