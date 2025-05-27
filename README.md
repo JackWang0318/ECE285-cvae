@@ -19,12 +19,13 @@ This project aims to implement a Conditional Variational Autoencoder (CVAE) arch
 ├── model/               # CVAE model definition and implementation
 ├── utils/               # Helper functions and tools
 ├── results/             # Results and outputs
-├── reports/            # Project reports and documentation
+├── reports/             # Project reports and documentation
 ├── references/          # References and materials
 ├── Dataset_EDA.ipynb              # Dataset exploration and analysis notebook
 ├── Dataset_preprocess.ipynb       # Data preprocessing notebook
 ├── Dataset_Split_to_Fonts.ipynb   # Font splitting and organization notebook
-├── CVAE_pipeline.ipynb           # Main CVAE training and evaluation pipeline
+├── CVAE_pipeline.ipynb            # Main CVAE training and evaluation pipeline
+├── CVAE_pipeline_new.ipynb        # Modified CVAE training and evaluation pipeline
 └── requirements.txt     # Project dependencies
 
 ```
